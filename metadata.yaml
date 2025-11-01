@@ -3,4 +3,4 @@ display_name: 爱点赞 # 用于展示的名字，可以是方便人类阅读的
 desc: 【仅QQ】智能点赞，支持每日定时自动点赞和赞我等功能。 # 插件简短描述
 version: v1.0.0 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: 芝士雪豹 # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+repo: https://github.com/furry520-source/astrbot_plugin_furry_zan # 插件的仓库地址
