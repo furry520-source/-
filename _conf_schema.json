@@ -37,7 +37,7 @@
         "default": 20
     },
     "auto_like_time": {
-        "description": "每日自动点赞时间",
+        "description": "每日打卡时间",
         "type": "string",
         "hint": "格式：HH:MM:SS，例如 08:00:00",
         "default": "09:00:00"
@@ -47,5 +47,11 @@
         "type": "list",
         "hint": "自动点赞开始和完成时会发送通知到这些群组",
         "default": []
+    },
+    "notify_delay": {
+        "description": "通知发送延迟",
+        "type": "int",
+        "hint": "发送群通知之间的延迟时间（秒），用于防止消息发送过快",
+        "default": 1
     }
 }
