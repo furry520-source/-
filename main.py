@@ -44,7 +44,7 @@ limit_responses = [
     "AstrBot 芝士雪豹",
     "自动赞我插件 - 支持每日自动点赞",
     "1.0.0",
-    "https://github.com/furry520-source/-/tree/astrbot_plugin_furry_zan",
+    "https://github.com/furry520-source/astrbot_plugin_furry_zan",
 )
 class AutoZanWo(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
