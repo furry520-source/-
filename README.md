@@ -1,9 +1,51 @@
-# helloworld
+# astrbot_plugin_furry_zan
 
-AstrBot 插件模板
+一个可爱的 AstrBot 插件，用于在群聊中实现“点赞”功能。
 
-A template plugin for AstrBot plugin feature
+## 功能特点
 
-# 支持
+- 🎯 **自动点赞**：支持每日定时自动给订阅用户点赞
+- 👍 **赞我功能**：任何人都可以在群里发送“赞我”触发手动点赞
+- 📅 **精确时间控制**：可设置每日自动点赞的具体时间
+- 👥 **好友订阅**：只有好友才能订阅自动点赞，保护隐私
+- 📢 **群通知**：点赞结果和状态变化会推送到指定群组
+- 🔧 **自动日期修复**：自动处理日期异常，确保点赞正常运行
+- 📊 **状态查询**：管理员可查看详细的插件运行状态
 
-[帮助文档](https://astrbot.app)
+## 使用方法
+
+1. **赞我功能**  
+   在任意支持的群里发送 `赞我`，即可触发手动点赞。
+
+2. **订阅自动点赞**  
+   发送命令：`订阅点赞`  
+   只有好友才能订阅，订阅后会在每天设定的时间自动点赞。
+
+3. **取消订阅**  
+   发送命令：`取消订阅点赞`
+
+4. **查看状态**（管理员命令）  
+   - `调试信息`：查看详细的插件运行状态  
+   - `点赞状态`：查看插件的主要运行参数
+
+## 配置参数
+
+| 参数名 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `enable_white_list_groups` | bool | `False` | 是否启用群白名单 |
+| `white_list_groups` | list[str] | `[]` | 允许使用的群ID列表 |
+| `subscribed_users` | list[str] | `[]` | 已订阅的用户ID列表 |
+| `zanwo_date` | str | `"2025-01-01"` | 最后一次点赞的日期 |
+| `auto_like_enabled` | bool | `True` | 是否启用自动点赞 |
+| `likes_per_user` | int | `20` | 每次给用户点赞的次数 |
+| `auto_like_time` | str | `"09:00:00"` | 自动点赞的时间（格式：HH:MM:SS） |
+| `notify_groups` | list[str] | `[]` | 接收通知的群ID列表 |
+
+## 如何添加到 AstrBot
+
+1. 将插件文件放在 AstrBot 的 `plugins` 目录下
+2. 重启 AstrBot 加载插件
+3. 根据需要配置插件参数（修改 `config/astrbot_config.json`）
+
+## 访问量
+![Moe Counter](https://moe.tans.fun/@furry520-source?theme=asoul&padding=7&scale=1)
