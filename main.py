@@ -44,7 +44,7 @@ limit_responses = [
     "AstrBot 芝士雪豹",
     "自动赞我插件 - 支持每日自动点赞",
     "1.0.0",
-    "https://github.com/furry520-source/astrbot_plugin_furry_zan",
+    "https://github.com/your-repo/astrbot_plugin_auto_zanwo",
 )
 class AutoZanWo(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -86,6 +86,9 @@ class AutoZanWo(Star):
         # 后台任务管理
         self._auto_like_task: asyncio.Task = None
         
+        # 记录配置变更前的旧时间，用于检测时间修改
+        self._old_auto_like_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
+        
         logger.info(f"🤖 自动点赞插件初始化完成")
         logger.info(f"⏰ 自动点赞时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}")
         logger.info(f"📅 最后点赞日期: {self.zanwo_date}")
@@ -118,20 +121,35 @@ class AutoZanWo(Star):
         
         return next_time.strftime("%Y年%m月%d日 %H:%M:%S")
 
-    async def check_and_fix_date_issue(self) -> str:
+    async def check_and_fix_date_issue(self, check_time_change: bool = False) -> str:
         """检查并自动修复日期问题"""
         now = datetime.now()
         today = now.date().strftime("%Y-%m-%d")
         
         # 使用time对象简化时间比较
         target_time = time(self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
+        current_time = now.time()
+        
+        # 检查时间是否被修改过
+        time_changed = False
+        if check_time_change:
+            old_hour, old_minute, old_second = self._old_auto_like_time
+            time_changed = (old_hour != self.auto_like_hour or 
+                          old_minute != self.auto_like_minute or 
+                          old_second != self.auto_like_second)
         
         # 如果最后点赞日期是今天，但当前时间已经过了设置的点赞时间，说明今天应该点赞但被阻止了
+        # 或者时间被修改过，需要重新评估
         should_fix = (
             self.auto_like_enabled and 
             len(self.subscribed_users) > 0 and 
             self.zanwo_date == today and
-            now.time() > target_time
+            (
+                # 情况1：当前时间已经超过了设置的点赞时间
+                current_time > target_time or
+                # 情况2：时间被修改过，且新时间在当前时间之前
+                (time_changed and target_time < current_time)
+            )
         )
         
         if should_fix:
@@ -141,10 +159,59 @@ class AutoZanWo(Star):
             self.config["zanwo_date"] = self.zanwo_date
             self.config.save_config()
             
-            logger.info(f"🔧 自动修复日期问题: {old_date} -> {yesterday}")
-            return f"🔧 已自动修复日期问题\n原日期: {old_date} → 新日期: {yesterday}"
+            # 更新旧时间记录
+            self._old_auto_like_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
+            
+            reason = "时间已过" if current_time > target_time else "时间修改"
+            logger.info(f"🔧 自动修复日期问题 ({reason}): {old_date} -> {yesterday}")
+            
+            if time_changed:
+                return f"🔧 时间修改自动修复\n原日期: {old_date} → 新日期: {yesterday}\n💡 今天将按照新时间重新打卡"
+            else:
+                return f"🔧 已自动修复日期问题\n原日期: {old_date} → 新日期: {yesterday}"
         
         return ""
+
+    async def update_config_from_file(self):
+        """从配置文件重新加载配置，并检查时间变化"""
+        # 保存旧时间用于比较
+        old_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
+        
+        # 重新加载配置
+        self.enable_white_list_groups = self.config.get("enable_white_list_groups", False)
+        self.white_list_groups = self.config.get("white_list_groups", [])
+        self.subscribed_users = self.config.get("subscribed_users", [])
+        self.zanwo_date = self.config.get("zanwo_date", "2025-01-01")
+        self.auto_like_enabled = self.config.get("auto_like_enabled", True)
+        self.likes_per_user = self.config.get("likes_per_user", 20)
+        
+        # 解析新的时间字符串
+        auto_like_time_str = self.config.get("auto_like_time", "09:00:00")
+        time_parts = auto_like_time_str.split(':')
+        if len(time_parts) >= 3:
+            self.auto_like_hour = int(time_parts[0])
+            self.auto_like_minute = int(time_parts[1])
+            self.auto_like_second = int(time_parts[2])
+        elif len(time_parts) == 2:
+            self.auto_like_hour = int(time_parts[0])
+            self.auto_like_minute = int(time_parts[1])
+            self.auto_like_second = 0
+        else:
+            self.auto_like_hour = int(auto_like_time_str)
+            self.auto_like_minute = 0
+            self.auto_like_second = 0
+        
+        self.notify_groups = self.config.get("notify_groups", [])
+        self.notify_delay = self.config.get("notify_delay", 1)
+        
+        # 检查时间是否变化并自动修复日期问题
+        new_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
+        if old_time != new_time:
+            logger.info(f"⏰ 检测到时间配置变化: {old_time[0]:02d}:{old_time[1]:02d}:{old_time[2]:02d} -> {new_time[0]:02d}:{new_time[1]:02d}:{new_time[2]:02d}")
+            self._old_auto_like_time = old_time
+            fix_result = await self.check_and_fix_date_issue(check_time_change=True)
+            if fix_result:
+                logger.info(f"🔄 配置更新自动修复: {fix_result}")
 
     async def send_group_notification(self, message: str):
         """发送群通知"""
@@ -196,6 +263,9 @@ class AutoZanWo(Star):
         
         while True:
             try:
+                # 每次检查前重新加载配置，检测配置变化
+                await self.update_config_from_file()
+                
                 now = datetime.now()
                 today = now.date().strftime("%Y-%m-%d")
                 
@@ -218,8 +288,8 @@ class AutoZanWo(Star):
                 # 如果等待时间较长，先等待到接近目标时间
                 if wait_seconds > 60:  # 如果等待时间超过1分钟
                     logger.info(f"⏰ 下次自动点赞将在 {wait_seconds:.0f} 秒后执行")
-                    # 等待到目标时间前1分钟
-                    await asyncio.sleep(wait_seconds - 60)
+                    # 等待到目标时间前1分钟，但最多等待1小时（避免配置更新不及时）
+                    await asyncio.sleep(min(wait_seconds - 60, 3600))
                     continue
                 
                 # 接近目标时间，开始精确检查
