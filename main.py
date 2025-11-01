@@ -85,6 +85,7 @@ class AutoZanWo(Star):
         
         # 后台任务管理
         self._auto_like_task: asyncio.Task = None
+        self._last_trigger_date: str = ""  # 记录上次触发日期，防止重复触发
         
         logger.info(f"🤖 自动点赞插件初始化完成")
         logger.info(f"⏰ 自动点赞时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}")
@@ -191,7 +192,7 @@ class AutoZanWo(Star):
         return user_id in self.friend_list
 
     async def _auto_like_checker(self):
-        """自动点赞检查器 - 使用精确的每秒检查"""
+        """自动点赞检查器 - 在目标分钟内的任何时间触发"""
         await asyncio.sleep(10)  # 初始延迟
         
         while True:
@@ -204,18 +205,22 @@ class AutoZanWo(Star):
                 if fix_result:
                     logger.info(f"🔄 自动修复日期: {fix_result}")
                 
-                # 检查自动点赞条件 - 精确到秒
+                # 检查自动点赞条件 - 在目标分钟内的任何时间触发
                 should_auto_like = (
                     self.auto_like_enabled and 
                     len(self.subscribed_users) > 0 and 
                     self.zanwo_date != today and
                     now.hour == self.auto_like_hour and
                     now.minute == self.auto_like_minute and
-                    now.second == self.auto_like_second
+                    # 防止在同一分钟内重复触发
+                    self._last_trigger_date != today
                 )
                 
                 if should_auto_like:
                     logger.info(f"🎯 触发自动点赞! 当前时间: {now.strftime('%H:%M:%S')}")
+                    
+                    # 记录触发日期，防止重复
+                    self._last_trigger_date = today
                     
                     platforms = self.context.platform_manager.get_insts()
                     for platform in platforms:
@@ -256,8 +261,8 @@ class AutoZanWo(Star):
             except Exception as e:
                 logger.error(f"自动点赞检查失败: {e}")
             
-            # 每秒检查一次，确保精确触发
-            await asyncio.sleep(1)
+            # 每分钟检查一次，减少CPU使用
+            await asyncio.sleep(60)
 
     async def _like_single_user(self, client, user_id: str, username: str = "未知用户") -> str:
         """给单个用户点赞"""
@@ -389,11 +394,10 @@ class AutoZanWo(Star):
         now = datetime.now()
         today_date = now.date().strftime("%Y-%m-%d")
         
-        # 精确到秒的时间匹配检查
+        # 精确到分钟的时间匹配检查
         time_match = (
             now.hour == self.auto_like_hour and 
-            now.minute == self.auto_like_minute and 
-            now.second == self.auto_like_second
+            now.minute == self.auto_like_minute
         )
         
         # 创建带时间的日期字符串用于显示
@@ -406,7 +410,8 @@ class AutoZanWo(Star):
             self.auto_like_enabled and 
             len(self.subscribed_users) > 0 and 
             self.zanwo_date != today_date and
-            time_match
+            time_match and
+            self._last_trigger_date != today_date
         )
         
         debug_info += f"\n满足自动点赞条件: {should_auto_like}\n下次点赞: {self.get_next_like_time()}"
