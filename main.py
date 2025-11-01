@@ -77,7 +77,7 @@ class AutoZanWo(Star):
             self.auto_like_second = 0
         
         self.notify_groups: list[str] = config.get("notify_groups", [])
-        self.notify_delay: int = config.get("notify_delay", 1)  # 通知延迟配置化
+        self.notify_delay: int = config.get("notify_delay", 1)
         
         # 缓存好友列表
         self.friend_list: list[str] = []
@@ -85,9 +85,6 @@ class AutoZanWo(Star):
         
         # 后台任务管理
         self._auto_like_task: asyncio.Task = None
-        
-        # 记录配置变更前的旧时间，用于检测时间修改
-        self._old_auto_like_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
         
         logger.info(f"🤖 自动点赞插件初始化完成")
         logger.info(f"⏰ 自动点赞时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}")
@@ -121,34 +118,20 @@ class AutoZanWo(Star):
         
         return next_time.strftime("%Y年%m月%d日 %H:%M:%S")
 
-    async def check_and_fix_date_issue(self, check_time_change: bool = False) -> str:
+    async def check_and_fix_date_issue(self) -> str:
         """检查并自动修复日期问题"""
         now = datetime.now()
         today = now.date().strftime("%Y-%m-%d")
         
-        # 使用time对象简化时间比较
-        target_time = time(self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
-        current_time = now.time()
-        
-        # 检查时间是否被修改过
-        time_changed = False
-        if check_time_change:
-            old_hour, old_minute, old_second = self._old_auto_like_time
-            time_changed = (old_hour != self.auto_like_hour or 
-                          old_minute != self.auto_like_minute or 
-                          old_second != self.auto_like_second)
-        
         # 如果最后点赞日期是今天，但当前时间已经过了设置的点赞时间，说明今天应该点赞但被阻止了
-        # 或者时间被修改过，需要重新评估
         should_fix = (
             self.auto_like_enabled and 
             len(self.subscribed_users) > 0 and 
             self.zanwo_date == today and
             (
-                # 情况1：当前时间已经超过了设置的点赞时间
-                current_time > target_time or
-                # 情况2：时间被修改过，且新时间在当前时间之前
-                (time_changed and target_time < current_time)
+                now.hour > self.auto_like_hour or
+                (now.hour == self.auto_like_hour and now.minute > self.auto_like_minute) or
+                (now.hour == self.auto_like_hour and now.minute == self.auto_like_minute and now.second >= self.auto_like_second)
             )
         )
         
@@ -159,59 +142,10 @@ class AutoZanWo(Star):
             self.config["zanwo_date"] = self.zanwo_date
             self.config.save_config()
             
-            # 更新旧时间记录
-            self._old_auto_like_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
-            
-            reason = "时间已过" if current_time > target_time else "时间修改"
-            logger.info(f"🔧 自动修复日期问题 ({reason}): {old_date} -> {yesterday}")
-            
-            if time_changed:
-                return f"🔧 时间修改自动修复\n原日期: {old_date} → 新日期: {yesterday}\n💡 今天将按照新时间重新打卡"
-            else:
-                return f"🔧 已自动修复日期问题\n原日期: {old_date} → 新日期: {yesterday}"
+            logger.info(f"🔧 自动修复日期问题: {old_date} -> {yesterday}")
+            return f"🔧 已自动修复日期问题\n原日期: {old_date} → 新日期: {yesterday}"
         
         return ""
-
-    async def update_config_from_file(self):
-        """从配置文件重新加载配置，并检查时间变化"""
-        # 保存旧时间用于比较
-        old_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
-        
-        # 重新加载配置
-        self.enable_white_list_groups = self.config.get("enable_white_list_groups", False)
-        self.white_list_groups = self.config.get("white_list_groups", [])
-        self.subscribed_users = self.config.get("subscribed_users", [])
-        self.zanwo_date = self.config.get("zanwo_date", "2025-01-01")
-        self.auto_like_enabled = self.config.get("auto_like_enabled", True)
-        self.likes_per_user = self.config.get("likes_per_user", 20)
-        
-        # 解析新的时间字符串
-        auto_like_time_str = self.config.get("auto_like_time", "09:00:00")
-        time_parts = auto_like_time_str.split(':')
-        if len(time_parts) >= 3:
-            self.auto_like_hour = int(time_parts[0])
-            self.auto_like_minute = int(time_parts[1])
-            self.auto_like_second = int(time_parts[2])
-        elif len(time_parts) == 2:
-            self.auto_like_hour = int(time_parts[0])
-            self.auto_like_minute = int(time_parts[1])
-            self.auto_like_second = 0
-        else:
-            self.auto_like_hour = int(auto_like_time_str)
-            self.auto_like_minute = 0
-            self.auto_like_second = 0
-        
-        self.notify_groups = self.config.get("notify_groups", [])
-        self.notify_delay = self.config.get("notify_delay", 1)
-        
-        # 检查时间是否变化并自动修复日期问题
-        new_time = (self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
-        if old_time != new_time:
-            logger.info(f"⏰ 检测到时间配置变化: {old_time[0]:02d}:{old_time[1]:02d}:{old_time[2]:02d} -> {new_time[0]:02d}:{new_time[1]:02d}:{new_time[2]:02d}")
-            self._old_auto_like_time = old_time
-            fix_result = await self.check_and_fix_date_issue(check_time_change=True)
-            if fix_result:
-                logger.info(f"🔄 配置更新自动修复: {fix_result}")
 
     async def send_group_notification(self, message: str):
         """发送群通知"""
@@ -228,7 +162,6 @@ class AutoZanWo(Star):
                             try:
                                 await client.send_group_msg(group_id=int(group_id), message=message)
                                 logger.info(f"📢 已发送群通知到群 {group_id}")
-                                # 使用配置化的延迟
                                 await asyncio.sleep(self.notify_delay)
                             except Exception as e:
                                 logger.error(f"发送群通知到群 {group_id} 失败: {e}")
@@ -237,10 +170,10 @@ class AutoZanWo(Star):
             logger.error(f"发送群通知失败: {e}")
 
     async def _refresh_friend_list(self, client) -> bool:
-        """刷新好友列表 - 修复时间判断逻辑"""
+        """刷新好友列表"""
         try:
             if (self.last_friend_check and 
-                (datetime.now() - self.last_friend_check).total_seconds() < 600):  # 修复：使用total_seconds()
+                (datetime.now() - self.last_friend_check).total_seconds() < 600):
                 return True
                 
             friends = await client.get_friend_list()
@@ -258,14 +191,11 @@ class AutoZanWo(Star):
         return user_id in self.friend_list
 
     async def _auto_like_checker(self):
-        """自动点赞检查器 - 优化定时逻辑，减少CPU消耗"""
+        """自动点赞检查器 - 使用精确的每秒检查"""
         await asyncio.sleep(10)  # 初始延迟
         
         while True:
             try:
-                # 每次检查前重新加载配置，检测配置变化
-                await self.update_config_from_file()
-                
                 now = datetime.now()
                 today = now.date().strftime("%Y-%m-%d")
                 
@@ -274,76 +204,63 @@ class AutoZanWo(Star):
                 if fix_result:
                     logger.info(f"🔄 自动修复日期: {fix_result}")
                 
-                # 计算下次目标时间
-                target_time = datetime(now.year, now.month, now.day, 
-                                     self.auto_like_hour, self.auto_like_minute, self.auto_like_second)
+                # 检查自动点赞条件 - 精确到秒
+                should_auto_like = (
+                    self.auto_like_enabled and 
+                    len(self.subscribed_users) > 0 and 
+                    self.zanwo_date != today and
+                    now.hour == self.auto_like_hour and
+                    now.minute == self.auto_like_minute and
+                    now.second == self.auto_like_second
+                )
                 
-                # 如果今天的目标时间已过，计算明天的时间
-                if now >= target_time:
-                    target_time += timedelta(days=1)
-                
-                # 计算等待时间
-                wait_seconds = (target_time - now).total_seconds()
-                
-                # 如果等待时间较长，先等待到接近目标时间
-                if wait_seconds > 60:  # 如果等待时间超过1分钟
-                    logger.info(f"⏰ 下次自动点赞将在 {wait_seconds:.0f} 秒后执行")
-                    # 等待到目标时间前1分钟，但最多等待1小时（避免配置更新不及时）
-                    await asyncio.sleep(min(wait_seconds - 60, 3600))
-                    continue
-                
-                # 接近目标时间，开始精确检查
-                while wait_seconds > 0:
-                    await asyncio.sleep(min(wait_seconds, 1))  # 最多等待1秒
-                    now = datetime.now()
-                    wait_seconds = (target_time - now).total_seconds()
-                
-                # 到达目标时间，执行自动点赞
-                logger.info(f"🎯 触发自动点赞! 当前时间: {now.strftime('%H:%M:%S')}")
-                
-                platforms = self.context.platform_manager.get_insts()
-                for platform in platforms:
-                    if hasattr(platform, 'get_client'):
-                        client = platform.get_client()
-                        if client:
-                            await self._refresh_friend_list(client)
-                            
-                            friend_users = [
-                                user_id for user_id in self.subscribed_users 
-                                if user_id in self.friend_list
-                            ]
-                            
-                            if friend_users:
-                                logger.info(f"开始执行自动点赞，目标用户: {len(friend_users)} 人")
+                if should_auto_like:
+                    logger.info(f"🎯 触发自动点赞! 当前时间: {now.strftime('%H:%M:%S')}")
+                    
+                    platforms = self.context.platform_manager.get_insts()
+                    for platform in platforms:
+                        if hasattr(platform, 'get_client'):
+                            client = platform.get_client()
+                            if client:
+                                await self._refresh_friend_list(client)
                                 
-                                # 合并通知
-                                complete_message = f"🤖 自动点赞执行完成\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 成功点赞: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次\n⏳ 下次点赞: {self.get_next_like_time()}"
-                                await self.send_group_notification(complete_message)
+                                friend_users = [
+                                    user_id for user_id in self.subscribed_users 
+                                    if user_id in self.friend_list
+                                ]
                                 
-                                result = await self._like(client, friend_users)
-                                
-                                # 更新最后点赞日期
-                                self.zanwo_date = today
-                                self.config["zanwo_date"] = self.zanwo_date
-                                self.config.save_config()
-                                logger.info(f"✅ 已更新最后点赞日期为: {self.zanwo_date}")
-                            else:
-                                logger.warning("⚠️ 没有找到订阅的好友用户")
-                                self.zanwo_date = today
-                                self.config["zanwo_date"] = self.zanwo_date
-                                self.config.save_config()
-                            break
+                                if friend_users:
+                                    logger.info(f"开始执行自动点赞，目标用户: {len(friend_users)} 人")
+                                    
+                                    # 合并通知
+                                    complete_message = f"🤖 自动点赞执行完成\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 成功点赞: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次\n⏳ 下次点赞: {self.get_next_like_time()}"
+                                    await self.send_group_notification(complete_message)
+                                    
+                                    result = await self._like(client, friend_users)
+                                    
+                                    # 更新最后点赞日期
+                                    self.zanwo_date = today
+                                    self.config["zanwo_date"] = self.zanwo_date
+                                    self.config.save_config()
+                                    logger.info(f"✅ 已更新最后点赞日期为: {self.zanwo_date}")
+                                else:
+                                    logger.warning("⚠️ 没有找到订阅的好友用户")
+                                    self.zanwo_date = today
+                                    self.config["zanwo_date"] = self.zanwo_date
+                                    self.config.save_config()
+                                break
                 
             except asyncio.CancelledError:
                 logger.info("自动点赞任务被取消")
                 break
             except Exception as e:
                 logger.error(f"自动点赞检查失败: {e}")
-                # 出错后等待一段时间再重试
-                await asyncio.sleep(60)
+            
+            # 每秒检查一次，确保精确触发
+            await asyncio.sleep(1)
 
     async def _like_single_user(self, client, user_id: str, username: str = "未知用户") -> str:
-        """给单个用户点赞 - 核心点赞逻辑"""
+        """给单个用户点赞"""
         total_likes = 0
         error_reply = ""
         
@@ -361,8 +278,6 @@ class AutoZanWo(Star):
                 
             except Exception as e:
                 error_message = str(e)
-                # 注意：通过错误消息字符串判断失败原因是脆弱的
-                # 如果aiocqhttp库更新错误消息文本，此逻辑可能失效
                 if "已达" in error_message:
                     error_reply = random.choice(limit_responses)
                 elif "权限" in error_message:
@@ -386,7 +301,7 @@ class AutoZanWo(Star):
         return "点赞失败"
 
     async def _like(self, client, ids: list[str]) -> str:
-        """点赞的核心逻辑 - 重构以复用_like_single_user"""
+        """点赞的核心逻辑"""
         replys = []
         for user_id in ids:
             try:
