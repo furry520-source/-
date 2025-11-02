@@ -36,12 +36,6 @@
         "hint": "给每个用户点赞的次数",
         "default": 20
     },
-    "auto_like_time": {
-        "description": "每日打卡时间",
-        "type": "string",
-        "hint": "格式：HH:MM:SS，例如 08:00:00",
-        "default": "09:00:00"
-    },
     "notify_groups": {
         "description": "通知群组列表",
         "type": "list",
