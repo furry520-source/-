@@ -283,10 +283,7 @@ class AutoZanWo(Star):
     async def _refresh_friend_list(self, client) -> bool:
         """刷新好友列表"""
         try:
-            if (self.last_friend_check and 
-                (datetime.now() - self.last_friend_check).total_seconds() < 600):
-                return True
-                
+            # 强制刷新，不检查缓存时间
             friends = await client.get_friend_list()
             self.friend_list = [str(friend['user_id']) for friend in friends]
             self.last_friend_check = datetime.now()
@@ -298,6 +295,7 @@ class AutoZanWo(Star):
 
     async def _is_friend(self, client, user_id: str) -> bool:
         """检查是否为好友"""
+        # 每次都强制刷新好友列表，确保能识别新加的好友
         await self._refresh_friend_list(client)
         return user_id in self.friend_list
 
@@ -414,10 +412,11 @@ class AutoZanWo(Star):
 
     @filter.command("订阅点赞")
     async def subscribe_like(self, event: AiocqhttpMessageEvent):
-        """订阅点赞"""
+        """订阅点赞 - 强制刷新好友列表后检查"""
         sender_id = event.get_sender_id()
         
         client = event.bot
+        
         if not await self._is_friend(client, sender_id):
             yield event.plain_result("❌ 订阅失败\n💡 请先加我为好友再订阅自动点赞哦~")
             return
@@ -549,6 +548,7 @@ class AutoZanWo(Star):
                 if hasattr(platform, 'get_client'):
                     client = platform.get_client()
                     if client:
+                        # 强制刷新好友列表
                         await self._refresh_friend_list(client)
                         
                         friend_users = [
@@ -617,4 +617,4 @@ class AutoZanWo(Star):
         if self.auto_like_job:
             self.auto_like_job.remove()
         self.scheduler.shutdown()
-        logger.info("🛑 自动点赞插件已停止")
+        logger.info("🛑 自动点赞插件已停止") 
