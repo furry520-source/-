@@ -187,7 +187,7 @@ class AutoZanWo(Star):
     async def _execute_auto_like(self):
         """执行自动点赞"""
         try:
-            now = datetime.now(self.timezone)  # 使用带时区的时间
+            now = datetime.now(self.timezone)
             today = now.date().strftime("%Y-%m-%d")
             
             # 检查今天是否已经点赞过
@@ -219,7 +219,7 @@ class AutoZanWo(Star):
                             await self.send_group_notification(start_message)
                             
                             # 执行点赞
-                            result = await self._like(client, friend_users)
+                            result = await self._like_multiple_users(client, friend_users)
                             
                             # 更新最后点赞日期
                             self.zanwo_date = today
@@ -281,9 +281,13 @@ class AutoZanWo(Star):
             logger.error(f"发送群通知失败: {e}")
 
     async def _refresh_friend_list(self, client) -> bool:
-        """刷新好友列表"""
+        """刷新好友列表 - 添加缓存机制"""
         try:
-            # 强制刷新，不检查缓存时间
+            # 检查缓存是否过期（5分钟）
+            if (self.last_friend_check and 
+                (datetime.now() - self.last_friend_check).total_seconds() < 300):
+                return True
+                
             friends = await client.get_friend_list()
             self.friend_list = [str(friend['user_id']) for friend in friends]
             self.last_friend_check = datetime.now()
@@ -294,62 +298,13 @@ class AutoZanWo(Star):
             return False
 
     async def _is_friend(self, client, user_id: str) -> bool:
-        """检查是否为好友"""
-        # 每次都强制刷新好友列表，确保能识别新加的好友
+        """检查是否为好友 - 使用缓存"""
+        # 确保好友列表是最新的
         await self._refresh_friend_list(client)
         return user_id in self.friend_list
 
-    async def _like(self, client, ids: list[str]) -> str:
-        """点赞的核心逻辑"""
-        replys = []
-        for user_id in ids:
-            total_likes = 0
-            error_reply = ""
-            
-            try:
-                user_info = await client.get_stranger_info(user_id=int(user_id))
-                username = user_info.get("nickname", "未知用户")
-            except Exception as e:
-                username = "未知用户"
-            
-            remaining_likes = self.likes_per_user
-            success_count = 0
-            
-            while remaining_likes > 0 and success_count < 2:
-                try:
-                    like_times = min(10, remaining_likes)
-                    await client.send_like(user_id=int(user_id), times=like_times)
-                    total_likes += like_times
-                    remaining_likes -= like_times
-                    success_count += 1
-                    await asyncio.sleep(1)
-                    
-                except Exception as e:
-                    error_message = str(e)
-                    if "已达" in error_message:
-                        error_reply = random.choice(limit_responses)
-                    elif "权限" in error_message:
-                        error_reply = "点赞权限受限"
-                    else:
-                        error_reply = f"点赞失败: {error_message}"
-                    break
-
-            if total_likes > 0:
-                reply = random.choice(self.success_responses)
-                if "{username}" in reply:
-                    reply = reply.replace("{username}", username)
-                if "{total_likes}" in reply:
-                    reply = reply.replace("{total_likes}", str(total_likes))
-                replys.append(reply)
-            elif error_reply:
-                if "{username}" in error_reply:
-                    error_reply = error_reply.replace("{username}", username)
-                replys.append(error_reply)
-
-        return "\n".join(replys).strip()
-
-    async def _like_single_user(self, client, user_id: str, username: str = "未知用户") -> str:
-        """给单个用户点赞"""
+    async def _execute_like_for_user(self, client, user_id: str) -> tuple[int, str]:
+        """执行单个用户的点赞逻辑 - 核心点赞函数"""
         total_likes = 0
         error_reply = ""
         
@@ -375,6 +330,38 @@ class AutoZanWo(Star):
                     error_reply = f"点赞失败: {error_message}"
                 break
 
+        return total_likes, error_reply
+
+    async def _like_multiple_users(self, client, user_ids: list[str]) -> str:
+        """给多个用户点赞"""
+        replys = []
+        for user_id in user_ids:
+            try:
+                user_info = await client.get_stranger_info(user_id=int(user_id))
+                username = user_info.get("nickname", "未知用户")
+            except Exception:
+                username = "未知用户"
+            
+            total_likes, error_reply = await self._execute_like_for_user(client, user_id)
+            
+            if total_likes > 0:
+                reply = random.choice(self.success_responses)
+                if "{username}" in reply:
+                    reply = reply.replace("{username}", username)
+                if "{total_likes}" in reply:
+                    reply = reply.replace("{total_likes}", str(total_likes))
+                replys.append(reply)
+            elif error_reply:
+                if "{username}" in error_reply:
+                    error_reply = error_reply.replace("{username}", username)
+                replys.append(error_reply)
+
+        return "\n".join(replys).strip()
+
+    async def _like_single_user(self, client, user_id: str, username: str = "未知用户") -> str:
+        """给单个用户点赞 - 复用核心逻辑"""
+        total_likes, error_reply = await self._execute_like_for_user(client, user_id)
+        
         if total_likes > 0:
             reply = random.choice(self.success_responses)
             if "{username}" in reply:
@@ -412,7 +399,7 @@ class AutoZanWo(Star):
 
     @filter.command("订阅点赞")
     async def subscribe_like(self, event: AiocqhttpMessageEvent):
-        """订阅点赞 - 强制刷新好友列表后检查"""
+        """订阅点赞 - 使用缓存的好友列表"""
         sender_id = event.get_sender_id()
         
         client = event.bot
@@ -426,7 +413,7 @@ class AutoZanWo(Star):
             return
         
         self.subscribed_users.append(sender_id)
-        self._save_subscribed_users()  # 保存到配置文件
+        self._save_subscribed_users()
         
         logger.info(f"用户 {sender_id} 订阅了自动点赞")
         
@@ -445,7 +432,7 @@ class AutoZanWo(Star):
             return
         
         self.subscribed_users.remove(sender_id)
-        self._save_subscribed_users()  # 保存到配置文件
+        self._save_subscribed_users()
         
         logger.info(f"用户 {sender_id} 取消了自动点赞订阅")
         yield event.plain_result("✅ 取消订阅成功\n💡 我将不再自动给你点赞")
@@ -548,7 +535,7 @@ class AutoZanWo(Star):
                 if hasattr(platform, 'get_client'):
                     client = platform.get_client()
                     if client:
-                        # 强制刷新好友列表
+                        # 刷新好友列表
                         await self._refresh_friend_list(client)
                         
                         friend_users = [
@@ -557,7 +544,7 @@ class AutoZanWo(Star):
                         ]
                         
                         if friend_users:
-                            result = await self._like(client, friend_users)
+                            result = await self._like_multiple_users(client, friend_users)
                             # 更新为今天的日期，避免重复点赞
                             self.zanwo_date = today
                             self._save_store_data()
@@ -617,4 +604,4 @@ class AutoZanWo(Star):
         if self.auto_like_job:
             self.auto_like_job.remove()
         self.scheduler.shutdown()
-        logger.info("🛑 自动点赞插件已停止") 
+        logger.info("🛑 自动点赞插件已停止")
