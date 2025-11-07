@@ -42,10 +42,16 @@
         "hint": "自动点赞开始和完成时会发送通知到这些群组",
         "default": []
     },
-    "notify_delay": {
-        "description": "通知发送延迟",
-        "type": "int",
+    "like_delay_seconds": {
+        "description": "点赞延迟时间",
+        "type": "float",
+        "hint": "每次点赞操作之间的延迟时间（秒），用于防止API调用过快",
+        "default": 1.0
+    },
+    "notify_delay_seconds": {
+        "description": "通知延迟时间",
+        "type": "float",
         "hint": "发送群通知之间的延迟时间（秒），用于防止消息发送过快",
-        "default": 1
+        "default": 1.0
     }
 }
