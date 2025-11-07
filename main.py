@@ -1,7 +1,7 @@
 import random
 from datetime import datetime, time, timedelta
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
 from astrbot.core.config.astrbot_config import AstrBotConfig
 import astrbot.api.message_components as Comp
@@ -74,8 +74,8 @@ class AutoZanWo(Star):
         # 直接从配置获取订阅用户，不再使用单独的存储文件
         self.subscribed_users: list[str] = config.get("subscribed_users", [])
         
-        # 数据存储（仅用于点赞日期）
-        data_dir = Path("data/plugins/astrbot_plugin_furry_zan")
+        # 数据存储（仅用于点赞日期）- 使用 StarTools 获取数据目录
+        data_dir = StarTools.get_data_dir("astrbot_plugin_furry_zan")
         self.store_path = data_dir / "auto_like_data.json"
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.store_path.exists():
@@ -117,8 +117,14 @@ class AutoZanWo(Star):
         try:
             with self.store_path.open("r", encoding="utf-8") as f:
                 return json.load(f)
+        except FileNotFoundError:
+            logger.warning(f"数据文件 {self.store_path} 不存在，将使用默认值。")
+            return {}
+        except json.JSONDecodeError as e:
+            logger.error(f"解析自动点赞数据失败，文件可能已损坏: {e}")
+            return {}
         except Exception as e:
-            logger.error(f"加载自动点赞数据失败: {e}")
+            logger.error(f"加载自动点赞数据时发生未知错误: {e}")
             return {}
 
     def _save_store_data(self):
@@ -135,8 +141,10 @@ class AutoZanWo(Star):
             with self.store_path.open("w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             logger.debug("自动点赞数据已保存")
+        except IOError as e:
+            logger.error(f"保存自动点赞数据失败（IO错误）: {e}")
         except Exception as e:
-            logger.error(f"保存自动点赞数据失败: {e}")
+            logger.error(f"保存自动点赞数据时发生未知错误: {e}")
 
     def _save_subscribed_users(self):
         """保存订阅用户到配置文件"""
@@ -309,16 +317,14 @@ class AutoZanWo(Star):
         error_reply = ""
         
         remaining_likes = self.likes_per_user
-        success_count = 0
         
-        while remaining_likes > 0 and success_count < 2:
+        while remaining_likes > 0:
             try:
                 like_times = min(10, remaining_likes)
                 await client.send_like(user_id=int(user_id), times=like_times)
                 total_likes += like_times
                 remaining_likes -= like_times
-                success_count += 1
-                await asyncio.sleep(1)
+                await asyncio.sleep(1)  # 每次调用后适当休眠
                 
             except Exception as e:
                 error_message = str(e)
@@ -379,9 +385,9 @@ class AutoZanWo(Star):
     @filter.regex(r"^赞我$")
     async def like_me_public(self, event: AiocqhttpMessageEvent):
         """赞我功能 - 任何人都可以使用，不需要加好友"""
-        if self.enable_white_list_groups:
-            if event.get_group_id() not in self.white_list_groups:
-                return
+        # 简化条件判断
+        if self.enable_white_list_groups and event.get_group_id() not in self.white_list_groups:
+            return
         
         sender_id = event.get_sender_id()
         client = event.bot
@@ -389,7 +395,7 @@ class AutoZanWo(Star):
         try:
             user_info = await client.get_stranger_info(user_id=int(sender_id))
             username = user_info.get("nickname", "未知用户")
-        except:
+        except Exception:
             username = "未知用户"
         
         result = await self._like_single_user(client, sender_id, username)
