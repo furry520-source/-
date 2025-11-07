@@ -116,6 +116,24 @@ class AutoZanWo(Star):
         logger.info(f"📅 最后点赞日期: {self.zanwo_date}")
         logger.info(f"👥 订阅用户: {len(self.subscribed_users)} 人")
 
+        # 在初始化完成后检查是否需要立即执行
+        asyncio.create_task(self._check_and_execute_on_startup())
+
+    async def _check_and_execute_on_startup(self):
+        """启动时检查是否需要立即执行点赞"""
+        await asyncio.sleep(5)  # 等待系统完全启动
+        logger.info("🤖 自动点赞插件启动检查...")
+        now = datetime.now(self.timezone)
+        today_target = datetime(
+            now.year, now.month, now.day, 
+            self.auto_like_hour, self.auto_like_minute, self.auto_like_second,
+            tzinfo=self.timezone
+        )
+        
+        if now >= today_target and self.zanwo_date != now.date().strftime("%Y-%m-%d"):
+            logger.info("🕒 当前时间已过设定时间且今日未点赞，立即执行")
+            await self._execute_auto_like()
+
     def _load_store_data(self) -> dict:
         """加载存储数据（仅点赞日期和时间设置）"""
         try:
@@ -126,6 +144,9 @@ class AutoZanWo(Star):
             return {}
         except json.JSONDecodeError as e:
             logger.error(f"解析自动点赞数据失败，文件可能已损坏: {e}")
+            return {}
+        except PermissionError as e:
+            logger.error(f"没有权限读取数据文件: {e}")
             return {}
         except Exception as e:
             logger.error(f"加载自动点赞数据时发生未知错误: {e}")
@@ -145,6 +166,8 @@ class AutoZanWo(Star):
             with self.store_path.open("w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             logger.debug("自动点赞数据已保存")
+        except PermissionError as e:
+            logger.error(f"没有权限写入数据文件: {e}")
         except IOError as e:
             logger.error(f"保存自动点赞数据失败（IO错误）: {e}")
         except Exception as e:
@@ -178,18 +201,6 @@ class AutoZanWo(Star):
                     misfire_grace_time=300,  # 5分钟内错过仍执行
                 )
                 logger.info(f"✅ 自动点赞定时任务已设置: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}")
-                
-                # 立即检查是否需要执行（如果当前时间在设定时间之后）
-                now = datetime.now(self.timezone)
-                today_target = datetime(
-                    now.year, now.month, now.day, 
-                    self.auto_like_hour, self.auto_like_minute, self.auto_like_second,
-                    tzinfo=self.timezone
-                )
-                
-                if now >= today_target and self.zanwo_date != now.date().strftime("%Y-%m-%d"):
-                    logger.info("🕒 当前时间已过设定时间且未点赞，立即执行")
-                    asyncio.create_task(self._execute_auto_like())
                     
             except Exception as e:
                 logger.error(f"设置定时任务失败: {e}")
@@ -338,6 +349,14 @@ class AutoZanWo(Star):
         await self._refresh_friend_list(client)
         return user_id in self.friend_list
 
+    def _format_like_response(self, reply_template: str, username: str, total_likes: int = 0) -> str:
+        """格式化点赞响应消息"""
+        if "{username}" in reply_template:
+            reply_template = reply_template.replace("{username}", username)
+        if "{total_likes}" in reply_template:
+            reply_template = reply_template.replace("{total_likes}", str(total_likes))
+        return reply_template
+
     async def _execute_like_for_user(self, client, user_id: str) -> tuple[int, str]:
         """执行单个用户的点赞逻辑 - 核心点赞函数"""
         total_likes = 0
@@ -357,6 +376,8 @@ class AutoZanWo(Star):
                 
             except Exception as e:
                 error_message = str(e)
+                # 注意：这里仍然依赖错误消息字符串，因为 aiocqhttp 没有提供特定的异常类
+                # 这是一个潜在的风险点，需要关注库的更新
                 if "已达" in error_message:
                     error_reply = random.choice(limit_responses)
                 elif "权限" in error_message:
@@ -377,37 +398,27 @@ class AutoZanWo(Star):
             except Exception:
                 username = "未知用户"
             
-            total_likes, error_reply = await self._execute_like_for_user(client, user_id)
+            total_likes, error_reply_template = await self._execute_like_for_user(client, user_id)
             
             if total_likes > 0:
-                reply = random.choice(self.success_responses)
-                if "{username}" in reply:
-                    reply = reply.replace("{username}", username)
-                if "{total_likes}" in reply:
-                    reply = reply.replace("{total_likes}", str(total_likes))
+                reply_template = random.choice(self.success_responses)
+                reply = self._format_like_response(reply_template, username, total_likes)
                 replys.append(reply)
-            elif error_reply:
-                if "{username}" in error_reply:
-                    error_reply = error_reply.replace("{username}", username)
+            elif error_reply_template:
+                error_reply = self._format_like_response(error_reply_template, username)
                 replys.append(error_reply)
 
         return "\n".join(replys).strip()
 
     async def _like_single_user(self, client, user_id: str, username: str = "未知用户") -> str:
         """给单个用户点赞 - 复用核心逻辑"""
-        total_likes, error_reply = await self._execute_like_for_user(client, user_id)
+        total_likes, error_reply_template = await self._execute_like_for_user(client, user_id)
         
         if total_likes > 0:
-            reply = random.choice(self.success_responses)
-            if "{username}" in reply:
-                reply = reply.replace("{username}", username)
-            if "{total_likes}" in reply:
-                reply = reply.replace("{total_likes}", str(total_likes))
-            return reply
-        elif error_reply:
-            if "{username}" in error_reply:
-                error_reply = error_reply.replace("{username}", username)
-            return error_reply
+            reply_template = random.choice(self.success_responses)
+            return self._format_like_response(reply_template, username, total_likes)
+        elif error_reply_template:
+            return self._format_like_response(error_reply_template, username)
         
         return "点赞失败"
 
