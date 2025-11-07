@@ -71,10 +71,6 @@ class AutoZanWo(Star):
         
         self.notify_groups: list[str] = config.get("notify_groups", [])
         
-        # 新增配置：延迟时间设置
-        self.like_delay_seconds: float = config.get("like_delay_seconds", 1.0)
-        self.notify_delay_seconds: float = config.get("notify_delay_seconds", 1.0)
-        
         # 直接从配置获取订阅用户，不再使用单独的存储文件
         self.subscribed_users: list[str] = config.get("subscribed_users", [])
         
@@ -116,24 +112,6 @@ class AutoZanWo(Star):
         logger.info(f"📅 最后点赞日期: {self.zanwo_date}")
         logger.info(f"👥 订阅用户: {len(self.subscribed_users)} 人")
 
-        # 在初始化完成后检查是否需要立即执行
-        asyncio.create_task(self._check_and_execute_on_startup())
-
-    async def _check_and_execute_on_startup(self):
-        """启动时检查是否需要立即执行点赞"""
-        await asyncio.sleep(5)  # 等待系统完全启动
-        logger.info("🤖 自动点赞插件启动检查...")
-        now = datetime.now(self.timezone)
-        today_target = datetime(
-            now.year, now.month, now.day, 
-            self.auto_like_hour, self.auto_like_minute, self.auto_like_second,
-            tzinfo=self.timezone
-        )
-        
-        if now >= today_target and self.zanwo_date != now.date().strftime("%Y-%m-%d"):
-            logger.info("🕒 当前时间已过设定时间且今日未点赞，立即执行")
-            await self._execute_auto_like()
-
     def _load_store_data(self) -> dict:
         """加载存储数据（仅点赞日期和时间设置）"""
         try:
@@ -144,9 +122,6 @@ class AutoZanWo(Star):
             return {}
         except json.JSONDecodeError as e:
             logger.error(f"解析自动点赞数据失败，文件可能已损坏: {e}")
-            return {}
-        except PermissionError as e:
-            logger.error(f"没有权限读取数据文件: {e}")
             return {}
         except Exception as e:
             logger.error(f"加载自动点赞数据时发生未知错误: {e}")
@@ -166,8 +141,6 @@ class AutoZanWo(Star):
             with self.store_path.open("w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             logger.debug("自动点赞数据已保存")
-        except PermissionError as e:
-            logger.error(f"没有权限写入数据文件: {e}")
         except IOError as e:
             logger.error(f"保存自动点赞数据失败（IO错误）: {e}")
         except Exception as e:
@@ -201,6 +174,18 @@ class AutoZanWo(Star):
                     misfire_grace_time=300,  # 5分钟内错过仍执行
                 )
                 logger.info(f"✅ 自动点赞定时任务已设置: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}")
+                
+                # 立即检查是否需要执行（如果当前时间在设定时间之后）
+                now = datetime.now(self.timezone)
+                today_target = datetime(
+                    now.year, now.month, now.day, 
+                    self.auto_like_hour, self.auto_like_minute, self.auto_like_second,
+                    tzinfo=self.timezone
+                )
+                
+                if now >= today_target and self.zanwo_date != now.date().strftime("%Y-%m-%d"):
+                    logger.info("🕒 当前时间已过设定时间且未点赞，立即执行")
+                    asyncio.create_task(self._execute_auto_like())
                     
             except Exception as e:
                 logger.error(f"设置定时任务失败: {e}")
@@ -208,7 +193,7 @@ class AutoZanWo(Star):
             logger.info("❌ 自动点赞功能已禁用")
 
     async def _execute_auto_like(self):
-        """执行自动点赞 - 支持多账号"""
+        """执行自动点赞"""
         try:
             now = datetime.now(self.timezone)
             today = now.date().strftime("%Y-%m-%d")
@@ -224,56 +209,41 @@ class AutoZanWo(Star):
             
             logger.info(f"🎯 开始执行自动点赞，目标用户: {len(self.subscribed_users)} 人")
             
-            # 支持多账号：在所有可用平台上执行
             platforms = self.context.platform_manager.get_insts()
-            executed_count = 0
-            
             for platform in platforms:
                 if hasattr(platform, 'get_client'):
                     client = platform.get_client()
                     if client:
-                        try:
-                            await self._refresh_friend_list(client)
+                        await self._refresh_friend_list(client)
+                        
+                        friend_users = [
+                            user_id for user_id in self.subscribed_users 
+                            if user_id in self.friend_list
+                        ]
+                        
+                        if friend_users:
+                            # 先发送开始通知
+                            start_message = f"🤖 开始执行自动点赞\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 目标用户: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次"
+                            await self.send_group_notification(start_message)
                             
-                            friend_users = [
-                                user_id for user_id in self.subscribed_users 
-                                if user_id in self.friend_list
-                            ]
+                            # 执行点赞
+                            result = await self._like_multiple_users(client, friend_users)
                             
-                            if friend_users:
-                                # 先发送开始通知
-                                start_message = f"🤖 开始执行自动点赞\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 目标用户: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次"
-                                await self.send_group_notification(start_message)
-                                
-                                # 执行点赞
-                                result = await self._like_multiple_users(client, friend_users)
-                                
-                                # 更新最后点赞日期
-                                self.zanwo_date = today
-                                self._save_store_data()
-                                
-                                # 发送完成通知 - 独立异常处理
-                                try:
-                                    complete_message = f"✅ 自动点赞执行完成\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 成功点赞: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次\n⏳ 下次点赞: {self.get_next_like_time()}"
-                                    await self.send_group_notification(complete_message)
-                                except Exception as notify_error:
-                                    logger.error(f"发送完成通知失败，但点赞任务已成功完成: {notify_error}")
-                                
-                                logger.info(f"✅ 已更新最后点赞日期为: {self.zanwo_date}")
-                                executed_count += 1
-                            else:
-                                logger.warning(f"⚠️ 在平台 {platform} 上没有找到订阅的好友用户")
-                                # 即使没有好友用户，也更新日期避免重复检查
-                                self.zanwo_date = today
-                                self._save_store_data()
-                                
-                        except Exception as platform_error:
-                            logger.error(f"在平台 {platform} 上执行自动点赞失败: {platform_error}")
-                            # 继续尝试其他平台
-                            continue
-            
-            if executed_count == 0:
-                logger.error("❌ 在所有平台上执行自动点赞均失败")
+                            # 更新最后点赞日期
+                            self.zanwo_date = today
+                            self._save_store_data()
+                            
+                            # 发送完成通知
+                            complete_message = f"✅ 自动点赞执行完成\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 成功点赞: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次\n⏳ 下次点赞: {self.get_next_like_time()}"
+                            await self.send_group_notification(complete_message)
+                            
+                            logger.info(f"✅ 已更新最后点赞日期为: {self.zanwo_date}")
+                        else:
+                            logger.warning("⚠️ 没有找到订阅的好友用户")
+                            # 即使没有好友用户，也更新日期避免重复检查
+                            self.zanwo_date = today
+                            self._save_store_data()
+                        break
         
         except Exception as e:
             logger.error(f"自动点赞执行失败: {e}", exc_info=True)
@@ -297,14 +267,12 @@ class AutoZanWo(Star):
         return next_time.strftime("%Y年%m月%d日 %H:%M:%S")
 
     async def send_group_notification(self, message: str):
-        """发送群通知 - 支持多账号"""
+        """发送群通知"""
         if not self.notify_groups:
             return
             
         try:
             platforms = self.context.platform_manager.get_insts()
-            sent_count = 0
-            
             for platform in platforms:
                 if hasattr(platform, 'get_client'):
                     client = platform.get_client()
@@ -313,16 +281,10 @@ class AutoZanWo(Star):
                             try:
                                 await client.send_group_msg(group_id=int(group_id), message=message)
                                 logger.info(f"📢 已发送群通知到群 {group_id}")
-                                # 使用可配置的延迟时间
-                                if self.notify_delay_seconds > 0:
-                                    await asyncio.sleep(self.notify_delay_seconds)
+                                await asyncio.sleep(1)
                             except Exception as e:
                                 logger.error(f"发送群通知到群 {group_id} 失败: {e}")
-                        sent_count += 1
-            
-            if sent_count == 0:
-                logger.warning("⚠️ 在所有平台上发送群通知均失败")
-                
+                        break
         except Exception as e:
             logger.error(f"发送群通知失败: {e}")
 
@@ -349,14 +311,6 @@ class AutoZanWo(Star):
         await self._refresh_friend_list(client)
         return user_id in self.friend_list
 
-    def _format_like_response(self, reply_template: str, username: str, total_likes: int = 0) -> str:
-        """格式化点赞响应消息"""
-        if "{username}" in reply_template:
-            reply_template = reply_template.replace("{username}", username)
-        if "{total_likes}" in reply_template:
-            reply_template = reply_template.replace("{total_likes}", str(total_likes))
-        return reply_template
-
     async def _execute_like_for_user(self, client, user_id: str) -> tuple[int, str]:
         """执行单个用户的点赞逻辑 - 核心点赞函数"""
         total_likes = 0
@@ -370,14 +324,10 @@ class AutoZanWo(Star):
                 await client.send_like(user_id=int(user_id), times=like_times)
                 total_likes += like_times
                 remaining_likes -= like_times
-                # 使用可配置的延迟时间
-                if self.like_delay_seconds > 0:
-                    await asyncio.sleep(self.like_delay_seconds)
+                await asyncio.sleep(1)  # 每次调用后适当休眠
                 
             except Exception as e:
                 error_message = str(e)
-                # 注意：这里仍然依赖错误消息字符串，因为 aiocqhttp 没有提供特定的异常类
-                # 这是一个潜在的风险点，需要关注库的更新
                 if "已达" in error_message:
                     error_reply = random.choice(limit_responses)
                 elif "权限" in error_message:
@@ -398,27 +348,37 @@ class AutoZanWo(Star):
             except Exception:
                 username = "未知用户"
             
-            total_likes, error_reply_template = await self._execute_like_for_user(client, user_id)
+            total_likes, error_reply = await self._execute_like_for_user(client, user_id)
             
             if total_likes > 0:
-                reply_template = random.choice(self.success_responses)
-                reply = self._format_like_response(reply_template, username, total_likes)
+                reply = random.choice(self.success_responses)
+                if "{username}" in reply:
+                    reply = reply.replace("{username}", username)
+                if "{total_likes}" in reply:
+                    reply = reply.replace("{total_likes}", str(total_likes))
                 replys.append(reply)
-            elif error_reply_template:
-                error_reply = self._format_like_response(error_reply_template, username)
+            elif error_reply:
+                if "{username}" in error_reply:
+                    error_reply = error_reply.replace("{username}", username)
                 replys.append(error_reply)
 
         return "\n".join(replys).strip()
 
     async def _like_single_user(self, client, user_id: str, username: str = "未知用户") -> str:
         """给单个用户点赞 - 复用核心逻辑"""
-        total_likes, error_reply_template = await self._execute_like_for_user(client, user_id)
+        total_likes, error_reply = await self._execute_like_for_user(client, user_id)
         
         if total_likes > 0:
-            reply_template = random.choice(self.success_responses)
-            return self._format_like_response(reply_template, username, total_likes)
-        elif error_reply_template:
-            return self._format_like_response(error_reply_template, username)
+            reply = random.choice(self.success_responses)
+            if "{username}" in reply:
+                reply = reply.replace("{username}", username)
+            if "{total_likes}" in reply:
+                reply = reply.replace("{total_likes}", str(total_likes))
+            return reply
+        elif error_reply:
+            if "{username}" in error_reply:
+                error_reply = error_reply.replace("{username}", username)
+            return error_reply
         
         return "点赞失败"
 
@@ -556,7 +516,7 @@ class AutoZanWo(Star):
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("立即点赞")
     async def immediate_like(self, event: AiocqhttpMessageEvent):
-        """立即执行点赞（测试用）- 支持多账号"""
+        """立即执行点赞（测试用）- 自动处理日期检查"""
         try:
             now = datetime.now(self.timezone)
             today = now.date().strftime("%Y-%m-%d")
@@ -576,42 +536,31 @@ class AutoZanWo(Star):
                 
             yield event.plain_result("🔄 开始立即执行点赞...")
             
-            # 支持多账号：在所有可用平台上执行
             platforms = self.context.platform_manager.get_insts()
-            executed_count = 0
-            total_friend_users = 0
-            
             for platform in platforms:
                 if hasattr(platform, 'get_client'):
                     client = platform.get_client()
                     if client:
-                        try:
-                            # 刷新好友列表
-                            await self._refresh_friend_list(client)
+                        # 刷新好友列表
+                        await self._refresh_friend_list(client)
+                        
+                        friend_users = [
+                            user_id for user_id in self.subscribed_users 
+                            if user_id in self.friend_list
+                        ]
+                        
+                        if friend_users:
+                            result = await self._like_multiple_users(client, friend_users)
+                            # 更新为今天的日期，避免重复点赞
+                            self.zanwo_date = today
+                            self._save_store_data()
                             
-                            friend_users = [
-                                user_id for user_id in self.subscribed_users 
-                                if user_id in self.friend_list
-                            ]
-                            
-                            if friend_users:
-                                result = await self._like_multiple_users(client, friend_users)
-                                total_friend_users += len(friend_users)
-                                executed_count += 1
-                            else:
-                                logger.warning(f"在平台 {platform} 上没有找到订阅的好友用户")
-                                
-                        except Exception as platform_error:
-                            logger.error(f"在平台 {platform} 上执行立即点赞失败: {platform_error}")
-                            continue
-            
-            if executed_count > 0:
-                # 更新为今天的日期，避免重复点赞
-                self.zanwo_date = today
-                self._save_store_data()
-                yield event.plain_result(f"✅ 立即点赞完成\n👥 成功在 {executed_count} 个平台上点赞\n👤 总点赞用户: {total_friend_users} 人")
+                            yield event.plain_result(f"✅ 立即点赞完成\n👥 成功点赞: {len(friend_users)} 人\n{result}")
+                        else:
+                            yield event.plain_result("❌ 没有找到订阅的好友用户")
+                        break
             else:
-                yield event.plain_result("❌ 在所有平台上执行立即点赞均失败")
+                yield event.plain_result("❌ 未找到可用的客户端")
                 
         except Exception as e:
             logger.error(f"立即点赞失败: {e}")
@@ -630,10 +579,7 @@ class AutoZanWo(Star):
             next_run = self.auto_like_job.next_run_time
             job_status = f"已设置，下次运行: {next_run.strftime('%Y-%m-%d %H:%M:%S') if next_run else '无'}"
         
-        # 获取平台数量
-        platforms_count = len(self.context.platform_manager.get_insts())
-        
-        debug_info = f"🔍 调试信息\n当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n设置时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}\n最后点赞日期: {self.zanwo_date}\n今天日期: {today_date}\n日期不同: {self.zanwo_date != today_date}\n自动点赞启用: {self.auto_like_enabled}\n订阅用户数: {len(self.subscribed_users)}\n好友数: {len(self.friend_list)}\n通知群组: {len(self.notify_groups)}\n平台数量: {platforms_count}\n点赞延迟: {self.like_delay_seconds}秒\n通知延迟: {self.notify_delay_seconds}秒\n定时任务: {job_status}"
+        debug_info = f"🔍 调试信息\n当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n设置时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}\n最后点赞日期: {self.zanwo_date}\n今天日期: {today_date}\n日期不同: {self.zanwo_date != today_date}\n自动点赞启用: {self.auto_like_enabled}\n订阅用户数: {len(self.subscribed_users)}\n好友数: {len(self.friend_list)}\n通知群组: {len(self.notify_groups)}\n定时任务: {job_status}"
         
         should_auto_like = (
             self.auto_like_enabled and 
@@ -655,10 +601,7 @@ class AutoZanWo(Star):
         # 检查定时任务状态
         job_status = "✅ 运行中" if self.auto_like_job else "❌ 未运行"
         
-        # 获取平台数量
-        platforms_count = len(self.context.platform_manager.get_insts())
-        
-        status_info = f"🤖 点赞插件状态\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n📅 最后点赞日期: {self.zanwo_date}\n🔢 每人点赞: {self.likes_per_user} 次\n✅ 自动点赞: {'已开启' if self.auto_like_enabled else '已关闭'}\n👥 订阅用户: {len(self.subscribed_users)} 人\n📢 通知群组: {len(self.notify_groups)} 个\n🌐 平台数量: {platforms_count} 个\n⏱️ 点赞延迟: {self.like_delay_seconds}秒\n⏱️ 通知延迟: {self.notify_delay_seconds}秒\n🔄 定时任务: {job_status}"
+        status_info = f"🤖 点赞插件状态\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n📅 最后点赞日期: {self.zanwo_date}\n🔢 每人点赞: {self.likes_per_user} 次\n✅ 自动点赞: {'已开启' if self.auto_like_enabled else '已关闭'}\n👥 订阅用户: {len(self.subscribed_users)} 人\n📢 通知群组: {len(self.notify_groups)} 个\n🔄 定时任务: {job_status}"
         
         yield event.plain_result(status_info)
 
