@@ -71,7 +71,7 @@ class AutoZanWo(Star):
         
         self.notify_groups: list[str] = config.get("notify_groups", [])
         
-        # 直接从配置获取订阅用户，不再使用单独的存储文件
+        # 直接从配置获取自动用户，不再使用单独的存储文件
         self.subscribed_users: list[str] = config.get("subscribed_users", [])
         
         # 数据存储（仅用于点赞日期）- 使用 StarTools 获取数据目录
@@ -110,7 +110,7 @@ class AutoZanWo(Star):
         logger.info(f"🤖 自动点赞插件初始化完成")
         logger.info(f"⏰ 自动点赞时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}")
         logger.info(f"📅 最后点赞日期: {self.zanwo_date}")
-        logger.info(f"👥 订阅用户: {len(self.subscribed_users)} 人")
+        logger.info(f"👥 自动用户: {len(self.subscribed_users)} 人")
 
     def _load_store_data(self) -> dict:
         """加载存储数据（仅点赞日期和时间设置）"""
@@ -147,13 +147,13 @@ class AutoZanWo(Star):
             logger.error(f"保存自动点赞数据时发生未知错误: {e}")
 
     def _save_subscribed_users(self):
-        """保存订阅用户到配置文件"""
+        """保存自动用户到配置文件"""
         try:
             self.config["subscribed_users"] = self.subscribed_users
             self.config.save_config()
-            logger.debug("订阅用户已保存到配置")
+            logger.debug("自动用户已保存到配置")
         except Exception as e:
-            logger.error(f"保存订阅用户到配置失败: {e}")
+            logger.error(f"保存自动用户到配置失败: {e}")
 
     def _setup_auto_like_job(self):
         """设置自动点赞定时任务"""
@@ -204,7 +204,7 @@ class AutoZanWo(Star):
                 return
             
             if not self.subscribed_users:
-                logger.warning("⏭️ 没有订阅用户，跳过执行")
+                logger.warning("⏭️ 没有自动用户，跳过执行")
                 return
             
             logger.info(f"🎯 开始执行自动点赞，目标用户: {len(self.subscribed_users)} 人")
@@ -239,7 +239,7 @@ class AutoZanWo(Star):
                             
                             logger.info(f"✅ 已更新最后点赞日期为: {self.zanwo_date}")
                         else:
-                            logger.warning("⚠️ 没有找到订阅的好友用户")
+                            logger.warning("⚠️ 没有找到自动的好友用户")
                             # 即使没有好友用户，也更新日期避免重复检查
                             self.zanwo_date = today
                             self._save_store_data()
@@ -403,45 +403,45 @@ class AutoZanWo(Star):
         response = f"🎯 赞我功能\n👤 用户: {username}\n{result}"
         yield event.plain_result(response)
 
-    @filter.command("订阅点赞")
+    @filter.command("自动点赞")
     async def subscribe_like(self, event: AiocqhttpMessageEvent):
-        """订阅点赞 - 使用缓存的好友列表"""
+        """自动点赞 - 使用缓存的好友列表"""
         sender_id = event.get_sender_id()
         
         client = event.bot
         
         if not await self._is_friend(client, sender_id):
-            yield event.plain_result("❌ 订阅失败\n💡 请先加我为好友再订阅自动点赞哦~")
+            yield event.plain_result("❌ 自动失败\n💡 请先加我为好友再自动自动点赞哦~")
             return
             
         if sender_id in self.subscribed_users:
-            yield event.plain_result("ℹ️ 订阅状态\n💡 你已经订阅点赞了哦~")
+            yield event.plain_result("ℹ️ 自动状态\n💡 你已经自动点赞了哦~")
             return
         
         self.subscribed_users.append(sender_id)
         self._save_subscribed_users()
         
-        logger.info(f"用户 {sender_id} 订阅了自动点赞")
+        logger.info(f"用户 {sender_id} 自动了自动点赞")
         
         auto_time = f"{self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}"
         next_time = self.get_next_like_time()
         
-        response = f"✅ 订阅成功\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n🔢 每人点赞: {self.likes_per_user} 次\n💡 提示: 只有好友才能订阅自动点赞"
+        response = f"✅ 自动成功\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n🔢 每人点赞: {self.likes_per_user} 次\n💡 提示: 只有好友才能自动自动点赞"
         yield event.plain_result(response)
 
-    @filter.command("取消订阅点赞")
+    @filter.command("取消自动点赞")
     async def unsubscribe_like(self, event: AiocqhttpMessageEvent):
-        """取消订阅点赞"""
+        """取消自动点赞"""
         sender_id = event.get_sender_id()
         if sender_id not in self.subscribed_users:
-            yield event.plain_result("ℹ️ 订阅状态\n💡 你还没有订阅点赞哦~")
+            yield event.plain_result("ℹ️ 自动状态\n💡 你还没有自动点赞哦~")
             return
         
         self.subscribed_users.remove(sender_id)
         self._save_subscribed_users()
         
-        logger.info(f"用户 {sender_id} 取消了自动点赞订阅")
-        yield event.plain_result("✅ 取消订阅成功\n💡 我将不再自动给你点赞")
+        logger.info(f"用户 {sender_id} 取消了自动点赞自动")
+        yield event.plain_result("✅ 取消自动成功\n💡 我将不再自动给你点赞")
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("设置点赞时间")
@@ -531,7 +531,7 @@ class AutoZanWo(Star):
                 yield event.plain_result(f"🔄 检测到今天已点赞过，自动重置日期后继续执行...")
                 
             if not self.subscribed_users:
-                yield event.plain_result("❌ 没有订阅用户")
+                yield event.plain_result("❌ 没有自动用户")
                 return
                 
             yield event.plain_result("🔄 开始立即执行点赞...")
@@ -557,7 +557,7 @@ class AutoZanWo(Star):
                             
                             yield event.plain_result(f"✅ 立即点赞完成\n👥 成功点赞: {len(friend_users)} 人\n{result}")
                         else:
-                            yield event.plain_result("❌ 没有找到订阅的好友用户")
+                            yield event.plain_result("❌ 没有找到自动的好友用户")
                         break
             else:
                 yield event.plain_result("❌ 未找到可用的客户端")
@@ -579,7 +579,7 @@ class AutoZanWo(Star):
             next_run = self.auto_like_job.next_run_time
             job_status = f"已设置，下次运行: {next_run.strftime('%Y-%m-%d %H:%M:%S') if next_run else '无'}"
         
-        debug_info = f"🔍 调试信息\n当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n设置时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}\n最后点赞日期: {self.zanwo_date}\n今天日期: {today_date}\n日期不同: {self.zanwo_date != today_date}\n自动点赞启用: {self.auto_like_enabled}\n订阅用户数: {len(self.subscribed_users)}\n好友数: {len(self.friend_list)}\n通知群组: {len(self.notify_groups)}\n定时任务: {job_status}"
+        debug_info = f"🔍 调试信息\n当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n设置时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}\n最后点赞日期: {self.zanwo_date}\n今天日期: {today_date}\n日期不同: {self.zanwo_date != today_date}\n自动点赞启用: {self.auto_like_enabled}\n自动用户数: {len(self.subscribed_users)}\n好友数: {len(self.friend_list)}\n通知群组: {len(self.notify_groups)}\n定时任务: {job_status}"
         
         should_auto_like = (
             self.auto_like_enabled and 
@@ -601,7 +601,7 @@ class AutoZanWo(Star):
         # 检查定时任务状态
         job_status = "✅ 运行中" if self.auto_like_job else "❌ 未运行"
         
-        status_info = f"🤖 点赞插件状态\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n📅 最后点赞日期: {self.zanwo_date}\n🔢 每人点赞: {self.likes_per_user} 次\n✅ 自动点赞: {'已开启' if self.auto_like_enabled else '已关闭'}\n👥 订阅用户: {len(self.subscribed_users)} 人\n📢 通知群组: {len(self.notify_groups)} 个\n🔄 定时任务: {job_status}"
+        status_info = f"🤖 点赞插件状态\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n📅 最后点赞日期: {self.zanwo_date}\n🔢 每人点赞: {self.likes_per_user} 次\n✅ 自动点赞: {'已开启' if self.auto_like_enabled else '已关闭'}\n👥 自动用户: {len(self.subscribed_users)} 人\n📢 通知群组: {len(self.notify_groups)} 个\n🔄 定时任务: {job_status}"
         
         yield event.plain_result(status_info)
 

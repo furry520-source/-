@@ -12,9 +12,9 @@
         "default": []
     },
     "subscribed_users": {
-        "description": "订阅点赞的用户",
+        "description": "自动点赞的用户",
         "type": "list",
-        "hint": "此变量用来存储订阅点赞用户的Q号",
+        "hint": "此变量用来存储自动点赞用户的Q号",
         "default": []
     },
     "zanwo_date": {
