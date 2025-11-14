@@ -1,5 +1,5 @@
 ## 访问量
-![Moe Counter](https://moe.tans.fun/@furry520-source?theme=asoul&padding=7&scale=1)
+![Moe Counter](https://moe.tans.fun/@furry520-source-zan?theme=asoul&padding=7&scale=1)
 
 # astrbot_plugin_furry_zan
 
@@ -75,3 +75,6 @@
 - 只有好友才能自动自动点赞功能
 - 点赞次数受 QQ 平台限制，可能会触发风控
 - 建议设置合理的点赞时间，避免影响用户体验
+
+## 更新内容v1.1.0
+1. 更改部分指令的触发方式
