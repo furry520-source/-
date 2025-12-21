@@ -175,12 +175,38 @@ not_friend_responses = [
     "系统提示：请先添加好友",
 ]
 
+# 在黑名单中的回复消息
+blacklist_responses = [
+    "❌ 你在黑名单中，无法使用点赞功能",
+    "🚫 黑名单用户禁止使用本插件",
+    "⛔ 抱歉，你在黑名单中，无法点赞",
+    "🔒 黑名单限制，请联系管理员",
+    "🚷 禁止访问：你在黑名单中",
+    "⚡ 权限被拒绝：你在黑名单中",
+    "🛑 操作被阻止：你在黑名单中",
+    "⏸️ 暂停服务：你在黑名单中",
+    "🔐 访问受限：黑名单用户",
+    "🚨 安全警告：黑名单用户禁止操作",
+    "🎭 不好意思，你在黑名单中哦",
+    "💢 黑名单用户还想点赞？想得美！",
+    "😤 黑名单用户禁止使用此功能",
+    "🚯 黑名单用户请勿操作",
+    "📵 权限不足：黑名单用户",
+    "🔞 年龄不够？不，是黑名单！",
+    "🧱 你被墙了，黑名单用户",
+    "⚖️ 公正裁决：黑名单用户禁止",
+    "🧯 紧急阻止：黑名单用户操作",
+    "🪤 触发陷阱：黑名单用户",
+    "🔨 黑名单用户被锤了",
+    "🗑️ 黑名单用户请左转离开"
+]
+
 
 @register(
     "astrbot_plugin_furry_zan",
     "AstrBot 芝士雪豹",
     "自动赞我插件 - 支持每日自动点赞",
-    "1.2.0",
+    "1.3.0",
     "https://github.com/furry520-source/astrbot_plugin_furry_zan",
 )
 class AutoZanWo(Star):
@@ -194,6 +220,9 @@ class AutoZanWo(Star):
         self.white_list_groups: list[str] = config.get("white_list_groups", [])
         self.auto_like_enabled: bool = config.get("auto_like_enabled", True)
         self.likes_per_user: int = config.get("likes_per_user", 20)
+        
+        # 新增：黑名单用户
+        self.blacklist_users: list[str] = config.get("blacklist_users", [])
         
         # 设置默认的自动点赞时间（不再从配置读取）
         self.auto_like_hour = 9
@@ -242,6 +271,11 @@ class AutoZanWo(Star):
         logger.info(f"⏰ 自动点赞时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}")
         logger.info(f"📅 最后点赞日期: {self.zanwo_date}")
         logger.info(f"👥 自动用户: {len(self.subscribed_users)} 人")
+        logger.info(f"🚫 黑名单用户: {len(self.blacklist_users)} 人")
+
+    def _is_blacklisted(self, user_id: str) -> bool:
+        """检查用户是否在黑名单中"""
+        return user_id in self.blacklist_users
 
     def _load_store_data(self) -> dict:
         """加载存储数据（仅点赞日期和时间设置）"""
@@ -347,30 +381,31 @@ class AutoZanWo(Star):
                     if client:
                         await self._refresh_friend_list(client)
                         
-                        friend_users = [
+                        # 过滤掉黑名单用户
+                        valid_users = [
                             user_id for user_id in self.subscribed_users 
-                            if user_id in self.friend_list
+                            if user_id in self.friend_list and not self._is_blacklisted(user_id)
                         ]
                         
-                        if friend_users:
+                        if valid_users:
                             # 先发送开始通知
-                            start_message = f"🤖 开始执行自动点赞\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 目标用户: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次"
+                            start_message = f"🤖 开始执行自动点赞\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 目标用户: {len(valid_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次"
                             await self.send_group_notification(start_message)
                             
                             # 执行点赞
-                            result = await self._like_multiple_users(client, friend_users)
+                            result = await self._like_multiple_users(client, valid_users)
                             
                             # 更新最后点赞日期
                             self.zanwo_date = today
                             self._save_store_data()
                             
                             # 发送完成通知
-                            complete_message = f"✅ 自动点赞执行完成\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 成功点赞: {len(friend_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次\n⏳ 下次点赞: {self.get_next_like_time()}"
+                            complete_message = f"✅ 自动点赞执行完成\n⏰ 时间: {now.strftime('%Y年%m月%d日 %H:%M:%S')}\n👥 成功点赞: {len(valid_users)} 人\n🔢 每人点赞: {self.likes_per_user} 次\n⏳ 下次点赞: {self.get_next_like_time()}"
                             await self.send_group_notification(complete_message)
                             
                             logger.info(f"✅ 已更新最后点赞日期为: {self.zanwo_date}")
                         else:
-                            logger.warning("⚠️ 没有找到自动的好友用户")
+                            logger.warning("⚠️ 没有找到自动的好友用户或所有用户都在黑名单中")
                             # 即使没有好友用户，也更新日期避免重复检查
                             self.zanwo_date = today
                             self._save_store_data()
@@ -516,11 +551,17 @@ class AutoZanWo(Star):
     @filter.regex(r"^赞我$")
     async def like_me_public(self, event: AiocqhttpMessageEvent):
         """赞我功能 - 任何人都可以使用，不需要加好友"""
+        # 检查黑名单
+        sender_id = event.get_sender_id()
+        if self._is_blacklisted(sender_id):
+            reply = random.choice(blacklist_responses)
+            yield event.plain_result(reply)
+            return
+        
         # 简化条件判断
         if self.enable_white_list_groups and event.get_group_id() not in self.white_list_groups:
             return
         
-        sender_id = event.get_sender_id()
         client = event.bot
         
         try:
@@ -538,6 +579,12 @@ class AutoZanWo(Star):
     async def subscribe_like(self, event: AiocqhttpMessageEvent):
         """自动点赞 - 使用缓存的好友列表"""
         sender_id = event.get_sender_id()
+        
+        # 检查黑名单
+        if self._is_blacklisted(sender_id):
+            reply = random.choice(blacklist_responses)
+            yield event.plain_result(reply)
+            return
         
         client = event.bot
         
@@ -572,6 +619,8 @@ class AutoZanWo(Star):
     async def unsubscribe_like(self, event: AiocqhttpMessageEvent):
         """取消自动点赞"""
         sender_id = event.get_sender_id()
+        
+        # 黑名单用户也可以取消自动
         if sender_id not in self.subscribed_users:
             reply = random.choice(already_subscribed_responses).replace("已经", "还没有").replace("别重复", "还没有")
             yield event.plain_result(reply)
@@ -584,6 +633,80 @@ class AutoZanWo(Star):
         
         reply = random.choice(unsubscribe_responses)
         yield event.plain_result(reply)
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("添加黑名单")
+    async def add_blacklist(self, event: AiocqhttpMessageEvent, user_id: str):
+        """添加用户到黑名单"""
+        try:
+            if not user_id.isdigit():
+                yield event.plain_result("❌ 格式错误\n💡 请输入正确的QQ号")
+                return
+                
+            if user_id in self.blacklist_users:
+                yield event.plain_result(f"❌ 用户 {user_id} 已在黑名单中")
+                return
+            
+            self.blacklist_users.append(user_id)
+            self.config["blacklist_users"] = self.blacklist_users
+            self.config.save_config()
+            
+            # 如果用户在自动列表中，自动取消自动
+            if user_id in self.subscribed_users:
+                self.subscribed_users.remove(user_id)
+                self._save_subscribed_users()
+                logger.info(f"用户 {user_id} 被加入黑名单，已自动取消自动")
+                yield event.plain_result(f"✅ 已添加用户 {user_id} 到黑名单\n⚠️ 已自动取消该用户的自动")
+            else:
+                yield event.plain_result(f"✅ 已添加用户 {user_id} 到黑名单")
+                
+            logger.info(f"管理员添加用户 {user_id} 到黑名单")
+            
+        except Exception as e:
+            logger.error(f"添加黑名单失败: {e}")
+            yield event.plain_result(f"❌ 添加黑名单失败\n💡 错误: {e}")
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("移除黑名单")
+    async def remove_blacklist(self, event: AiocqhttpMessageEvent, user_id: str):
+        """从黑名单移除用户"""
+        try:
+            if not user_id.isdigit():
+                yield event.plain_result("❌ 格式错误\n💡 请输入正确的QQ号")
+                return
+                
+            if user_id not in self.blacklist_users:
+                yield event.plain_result(f"❌ 用户 {user_id} 不在黑名单中")
+                return
+            
+            self.blacklist_users.remove(user_id)
+            self.config["blacklist_users"] = self.blacklist_users
+            self.config.save_config()
+            
+            yield event.plain_result(f"✅ 已从黑名单移除用户 {user_id}")
+            
+            logger.info(f"管理员从黑名单移除用户 {user_id}")
+            
+        except Exception as e:
+            logger.error(f"移除黑名单失败: {e}")
+            yield event.plain_result(f"❌ 移除黑名单失败\n💡 错误: {e}")
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("查看黑名单")
+    async def view_blacklist(self, event: AiocqhttpMessageEvent):
+        """查看黑名单用户列表"""
+        try:
+            if not self.blacklist_users:
+                yield event.plain_result("📝 黑名单当前为空")
+                return
+                
+            blacklist_str = "\n".join([f"• {user_id}" for user_id in self.blacklist_users])
+            response = f"📋 黑名单用户列表（共 {len(self.blacklist_users)} 人）：\n{blacklist_str}"
+            yield event.plain_result(response)
+            
+        except Exception as e:
+            logger.error(f"查看黑名单失败: {e}")
+            yield event.plain_result(f"❌ 查看黑名单失败\n💡 错误: {e}")
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("设置点赞时间")
@@ -686,9 +809,10 @@ class AutoZanWo(Star):
                         # 刷新好友列表
                         await self._refresh_friend_list(client)
                         
+                        # 过滤掉黑名单用户
                         friend_users = [
                             user_id for user_id in self.subscribed_users 
-                            if user_id in self.friend_list
+                            if user_id in self.friend_list and not self._is_blacklisted(user_id)
                         ]
                         
                         if friend_users:
@@ -699,7 +823,7 @@ class AutoZanWo(Star):
                             
                             yield event.plain_result(f"✅ 立即点赞完成\n👥 成功点赞: {len(friend_users)} 人\n{result}")
                         else:
-                            yield event.plain_result("❌ 没有找到自动的好友用户")
+                            yield event.plain_result("❌ 没有找到自动的好友用户或所有用户都在黑名单中")
                         break
             else:
                 yield event.plain_result("❌ 未找到可用的客户端")
@@ -721,7 +845,7 @@ class AutoZanWo(Star):
             next_run = self.auto_like_job.next_run_time
             job_status = f"已设置，下次运行: {next_run.strftime('%Y-%m-%d %H:%M:%S') if next_run else '无'}"
         
-        debug_info = f"🔍 调试信息\n当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n设置时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}\n最后点赞日期: {self.zanwo_date}\n今天日期: {today_date}\n日期不同: {self.zanwo_date != today_date}\n自动点赞启用: {self.auto_like_enabled}\n自动用户数: {len(self.subscribed_users)}\n好友数: {len(self.friend_list)}\n通知群组: {len(self.notify_groups)}\n定时任务: {job_status}"
+        debug_info = f"🔍 调试信息\n当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n设置时间: {self.auto_like_hour:02d}:{self.auto_like_minute:02d}:{self.auto_like_second:02d}\n最后点赞日期: {self.zanwo_date}\n今天日期: {today_date}\n日期不同: {self.zanwo_date != today_date}\n自动点赞启用: {self.auto_like_enabled}\n自动用户数: {len(self.subscribed_users)}\n黑名单用户数: {len(self.blacklist_users)}\n好友数: {len(self.friend_list)}\n通知群组: {len(self.notify_groups)}\n定时任务: {job_status}"
         
         should_auto_like = (
             self.auto_like_enabled and 
@@ -743,7 +867,7 @@ class AutoZanWo(Star):
         # 检查定时任务状态
         job_status = "✅ 运行中" if self.auto_like_job else "❌ 未运行"
         
-        status_info = f"🤖 点赞插件状态\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n📅 最后点赞日期: {self.zanwo_date}\n🔢 每人点赞: {self.likes_per_user} 次\n✅ 自动点赞: {'已开启' if self.auto_like_enabled else '已关闭'}\n👥 自动用户: {len(self.subscribed_users)} 人\n📢 通知群组: {len(self.notify_groups)} 个\n🔄 定时任务: {job_status}"
+        status_info = f"🤖 点赞插件状态\n⏰ 自动点赞时间: {auto_time}\n⏳ 下次点赞: {next_time}\n📅 最后点赞日期: {self.zanwo_date}\n🔢 每人点赞: {self.likes_per_user} 次\n✅ 自动点赞: {'已开启' if self.auto_like_enabled else '已关闭'}\n👥 自动用户: {len(self.subscribed_users)} 人\n🚫 黑名单用户: {len(self.blacklist_users)} 人\n📢 通知群组: {len(self.notify_groups)} 个\n🔄 定时任务: {job_status}"
         
         yield event.plain_result(status_info)
 

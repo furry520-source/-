@@ -17,6 +17,12 @@
         "hint": "此变量用来存储自动点赞用户的Q号",
         "default": []
     },
+    "blacklist_users": {
+        "description": "黑名单用户",
+        "type": "list",
+        "hint": "禁止使用此插件点赞的用户Q号，优先级最高",
+        "default": []
+    },
     "zanwo_date": {
         "description": "点赞日期",
         "type": "string",
